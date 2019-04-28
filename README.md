@@ -9,7 +9,7 @@ service webframework
 ## use
 
 ```
-go get https://github.com/PyreneGitHub/cat
+go get github.com/PyreneGitHub/cat
 ```
 
 
