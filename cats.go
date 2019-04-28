@@ -1,0 +1,173 @@
+package cat
+
+import (
+	"strings"
+	"log"
+	"fmt"
+	"sync"
+	"time"
+	"runtime"
+)
+
+var (
+	stopCh = make(chan interface{})
+	once   = &sync.Once{}
+)
+
+type (
+	GroupRoute struct {
+		*Cats
+		F        Fn
+		GroupRoute   *strings.Builder
+	}
+	Cats struct {
+		*GroupRoute
+		GroupMap     map[string]Fn      
+		Middleware   map[string][]middleFn  
+		MaxGoroutine int
+		route        string 
+	}
+)
+
+func NewCats(max ...int) *Cats {
+	if max[0] == 0 {
+		max[0] = 100
+	}
+	fmt.Println(max[0])
+	c := &Cats{
+		GroupRoute:&GroupRoute{
+			GroupRoute:&strings.Builder{},
+		},
+		GroupMap:   make(map[string]Fn, 10),
+		Middleware: make(map[string][]middleFn,10),
+		MaxGoroutine: max[0],
+	}
+	c.GroupRoute.Cats = c
+	return c
+}
+
+func (c *Cats) Run(addr string) {
+	srv := new(Server)
+	srv.Cats = c
+	srv.Addr = addr
+	srv.W = c
+	srv.Max = c.MaxGoroutine
+	go c.Metric()
+	srv.Run()
+}
+
+func (c *Cats) Miao(r *Request, w Response) {
+	log.Println(r.Method, r.Uri)
+	fn, getRoute := c.GroupMap[r.Method+r.Uri]
+	switch {
+	case !getRoute:
+		goto loop
+	default:
+		fn(r, w)
+		return
+	}
+loop:
+	c.NotMethod(w)
+	return
+}
+
+func (c *Cats) Group(route string) *GroupRoute {
+	cat := &GroupRoute{
+		Cats:c,
+		GroupRoute:&strings.Builder{},
+	}
+	cat.GroupRoute.WriteString(route)
+	return cat
+}
+
+func (c *GroupRoute) Get(route string, f Fn)*GroupRoute{
+	c.addMethod("GET", route, f)
+	return c
+}
+
+func (c *GroupRoute) Post(route string, f Fn)*GroupRoute {
+	c.addMethod("POST", route, f)
+	return c
+}
+
+func (c *GroupRoute) Delete(route string, f Fn)*GroupRoute{
+	c.addMethod("DELETE", route, f)
+	return c
+}
+
+func (c *GroupRoute) Patch(route string, f Fn)*GroupRoute {
+	c.addMethod("PATCH", route, f)
+	return c
+}
+
+func (c *GroupRoute) Put(route string, f Fn)*GroupRoute {
+	c.addMethod("PUT", route, f)
+	return c
+}
+
+func (c *Cats) NotMethod(w Response) {
+	w.Result("404", "the method not found")
+}
+
+func (c *GroupRoute)addMethod(method, route string, f Fn) {
+	switch {
+	case c.GroupRoute.Len() == 0:
+		c.GroupMap[method+route] = f
+		c.route = method+route
+		for k,v := range c.GroupMap {
+			fmt.Println("k1--------",k,"v1-----",v,"453")
+		}
+
+	case c.GroupRoute.Len() >= 1:
+		groupRoute := c.GroupRoute.String()
+		route := join(groupRoute, route)
+		c.GroupMap[method+route] = f
+		c.route = method+route
+		for k,v := range c.GroupMap {
+			fmt.Println("k--------",k,"v-----",v,"453")
+		}
+	}
+}
+
+func join(group, route string) string {
+	var buf strings.Builder
+	buf.Reset()
+	switch {
+	case group[len(group)-1] == '/' && route[len(route)-1] != '/':
+		buf.WriteString(group)
+		buf.WriteString(route)
+		//buf.WriteString("/")
+		return buf.String()
+	default:
+		buf.WriteString(group)
+		buf.WriteString(route)
+		return buf.String()
+	}
+}
+
+func (c *Cats)Metric() {
+	for {
+		select {
+		case <-stopCh:
+			return
+		default:
+			log.Println(runtime.NumGoroutine())
+			time.Sleep(5 * time.Second)
+		}
+	}
+}
+
+func (s *Server) ShutDown() {
+	s.Cats.ShutDown()
+}
+
+func (c *Cats) ShutDown() {
+	for k, _ := range c.GroupMap {
+		delete(c.GroupMap, k)
+	}
+	once.Do(func() {
+		close(TaskCh)
+		close(stopCh)
+		log.Println("the server is closed")
+	})
+}
