@@ -26,7 +26,7 @@ import (
 )
 
 func main(){
-    cats := cat.NewCats(10) 
+    cats := cat.NewCats() 
     cats.Get("/",do)
     cats.Post("/",do)
     cats.Delete("/",do)
@@ -52,7 +52,7 @@ import (
 )
 
 func main(){
-         cats := NewCats()
+         cats := cat.NewCats()
 	 g1 := cats.Group("/")
 	 g1.Get("/v1", Do)
 	 g1.Post("/v1", Do)
