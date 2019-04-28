@@ -114,18 +114,12 @@ func (c *GroupRoute)addMethod(method, route string, f Fn) {
 	case c.GroupRoute.Len() == 0:
 		c.GroupMap[method+route] = f
 		c.route = method+route
-		for k,v := range c.GroupMap {
-			fmt.Println("k1--------",k,"v1-----",v,"453")
-		}
 
 	case c.GroupRoute.Len() >= 1:
 		groupRoute := c.GroupRoute.String()
 		route := join(groupRoute, route)
 		c.GroupMap[method+route] = f
 		c.route = method+route
-		for k,v := range c.GroupMap {
-			fmt.Println("k--------",k,"v-----",v,"453")
-		}
 	}
 }
 
@@ -136,7 +130,6 @@ func join(group, route string) string {
 	case group[len(group)-1] == '/' && route[len(route)-1] != '/':
 		buf.WriteString(group)
 		buf.WriteString(route)
-		//buf.WriteString("/")
 		return buf.String()
 	default:
 		buf.WriteString(group)
