@@ -68,8 +68,3 @@ func do(r *cat.Request,w cat.Response){
 	w.Result("200","hello world")
 }
 ```
-
-
-
-
-
