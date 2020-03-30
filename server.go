@@ -1,18 +1,22 @@
 package cat
 
 import (
-	"net"
-	"sync"
-	"bufio"
-	"io"
 	"fmt"
-	"strings"
+	"golang.org/x/sys/unix"
 	"log"
+	"net"
+	"reflect"
+	"strings"
+	"sync"
+	"syscall"
 )
 
-var TaskCh chan []interface{}
-
 type (
+	context struct {
+		request  *Request
+		response Response
+		f  Fn
+	}
 	Handlers interface {
 		Miao(request *Request, response Response)
 	}
@@ -23,60 +27,90 @@ type (
 		Uri    string
 		proto  string
 		conn   net.Conn
+		server *server
 	}
-	Server struct {
+	server struct {
 		*Cats
-		Addr string
-		W    Handlers
-		Max  int
+		addr string
+		handlers Handlers
+		max  int
+		fd    int
+		lock  *sync.RWMutex
+		m  map[int]net.Conn
+		network string
+		work *work
 	}
-	Work struct {
-		Max  int
+	work struct {
+		max  int
 		once *sync.Once
 	}
 	Fn func(*Request,Response)
 	middleFn func(*Request, *Response)
 )
 
+func newServer(c *Cats,addr string)(*server,error){
+	fd, err := unix.EpollCreate1(0)
+	if err != nil {
+		return nil, err
+	}
+	return &server{
+		Cats:     c,
+		addr:     addr,
+		handlers: c,
+		fd:fd,
+		lock:     &sync.RWMutex{},
+		m:        make(map[int]net.Conn,1000),
+		network:"tcp",
+	},nil
+}
 
 
-func (s *Server) handler(conn net.Conn) {
-	defer conn.(net.Conn).Close()
-	req := NewRequst()
-	resp := NewResonse()
-	r := bufio.NewReader(conn.(net.Conn))
-	buff := make([]byte, 2048)
+func (s *server) handler() {
+	conns := make([]net.Conn,0,1000)
+	buf := make([]byte,1024)
 	for {
 		select {
 		case <-stopCh:
 			return
 		default:
 		}
-		b, err := r.Read(buff)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Println("read byte err", err)
-				return
-			}
+		err := s.wait(&conns)
+		if err != nil || len(conns) == 0{
+			continue
 		}
-		req.AllHeader = strings.Split(string(buff[:b]), "\n\r")[0]
-		req.readHeader()
-		req.Body = strings.Split(string(buff[:b]), "\n\r")[1]
-		req.parseRequestLine()
-		resp.conn = conn.(net.Conn)
-		resp.proto = req.proto
-		s.W.Miao(req, resp)
-		return
+		for k,_ := range conns {
+			conn := conns[k]
+			b, err := conn.Read(buf)
+			if err != nil {
+				if err != nil {
+					s.remove(conns[k])
+					continue
+				}
+			}
+			req := NewRequst()
+			resp := NewResonse()
+			resp.server = s
+			req.AllHeader = strings.Split(string(buf[:b]), "\n\r")[0]
+			req.readHeader()
+			req.Body = strings.Split(string(buf[:b]), "\n\r")[1]
+			req.parseRequestLine()
+			resp.conn = conn
+			resp.proto = req.proto
+			go s.handlers.Miao(req,resp)
+		}
 	}
 }
 
-func (s *Server) Run() {
-	listen, err := net.Listen("tcp", s.Addr)
-	work := Pool(s.Max).NewPool()
+func (s *server) run() {
+	listen, err := net.Listen(s.network, s.addr)
 	if err != nil {
 		fmt.Println("listen err", err)
-		goto loop
+		return
 	}
+	fmt.Println("cat web framework is running at ",s.addr)
+	go func() {
+		s.handler()
+	}()
 	for {
 		select {
 		case <-stopCh:
@@ -85,53 +119,67 @@ func (s *Server) Run() {
 		}
 		conn, err := listen.Accept()
 		if err != nil {
-			fmt.Println("accept err")
-			goto loop
-		}
-		connContainer := make([]interface{}, 0, 2)
-		connContainer = append(connContainer, conn)
-		connContainer = append(connContainer, s.handler)
-		work.Do(connContainer)
-	}
-loop:
-	return
-}
-
-func Pool(max int) *Work {
-	work := &Work{
-		Max:  max,
-		once: &sync.Once{},
-	}
-	TaskCh = make(chan []interface{}, max)
-	return work
-}
-
-func (w *Work) NewPool() *Work {
-	for i := 0; i < w.Max; i++ {
-		go func() {
-			defer func(){
-				if err := recover();err != nil {
-					log.Println("this goroutine err",err)
-				}
-			}()
-			for task := range TaskCh {
-				conn := task[0].(net.Conn)
-				f := task[1].(func(net.Conn))
-				f(conn)
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				log.Printf("accept temp err: %v", ne)
+				continue
 			}
-		}()
+			log.Printf("accept err: %v", err)
+			return
+		}
+		if err := s.add(conn); err != nil {
+			log.Printf("failed to add connection %v", err)
+			conn.Close()
+		}
 	}
-	return w
 }
 
-func (w *Work) Do(f []interface{}) {
-	TaskCh <- f
+
+func (e *server) add(conn net.Conn) error {
+	fd := socketFD(conn)
+	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_ADD, fd, &unix.EpollEvent{Events: unix.POLLIN | unix.POLLHUP, Fd: int32(fd)})
+	if err != nil {
+		return err
+	}
+	e.lock.Lock()
+	e.m[fd] = conn
+	e.lock.Unlock()
+	return nil
 }
 
-func (w *Work) Close() {
-	w.once.Do(func() {
-		close(TaskCh)
-	})
+func (e *server) remove(conn net.Conn) error {
+	fd := socketFD(conn)
+	err := unix.EpollCtl(e.fd, syscall.EPOLL_CTL_DEL, fd, nil)
+	if err != nil {
+		return err
+	}
+	e.lock.Lock()
+	delete(e.m,fd)
+	e.lock.Unlock()
+	return nil
 }
-
+func (e *server) wait(conns *[]net.Conn)error{
+	*conns = (*conns)[0:0]
+	events := make([]unix.EpollEvent, 100)
+	n, err := unix.EpollWait(e.fd, events, 100)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < n; i++ {
+		e.lock.RLock()
+		conn,ok := e.m[int(events[i].Fd)]
+		if ok {
+			*conns = append(*conns,conn.(net.Conn))
+			e.lock.RUnlock()
+			continue
+		}
+		e.lock.RUnlock()
+	}
+	return nil
+}
+func socketFD(conn net.Conn) int {
+	tcpConn := reflect.Indirect(reflect.ValueOf(conn)).FieldByName("conn")
+	fdVal := tcpConn.FieldByName("fd")
+	pfdVal := reflect.Indirect(fdVal).FieldByName("pfd")
+	return int(pfdVal.FieldByName("Sysfd").Int())
+}
 

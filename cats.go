@@ -1,12 +1,11 @@
 package cat
 
 import (
-	"strings"
 	"log"
-	"fmt"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
-	"runtime"
 )
 
 var (
@@ -29,35 +28,28 @@ type (
 	}
 )
 
-func NewCats(max ...int) *Cats {
-	if max[0] == 0 {
-		max[0] = 100
-	}
-	fmt.Println(max[0])
+func NewCats() *Cats {
 	c := &Cats{
 		GroupRoute:&GroupRoute{
 			GroupRoute:&strings.Builder{},
 		},
 		GroupMap:   make(map[string]Fn, 10),
 		Middleware: make(map[string][]middleFn,10),
-		MaxGoroutine: max[0],
 	}
 	c.GroupRoute.Cats = c
 	return c
 }
 
-func (c *Cats) Run(addr string) {
-	srv := new(Server)
-	srv.Cats = c
-	srv.Addr = addr
-	srv.W = c
-	srv.Max = c.MaxGoroutine
-	go c.Metric()
-	srv.Run()
+func (c *Cats) Run(addr string)error {
+	if s,err := newServer(c,addr);err == nil {
+		s.run()
+	}else {
+		return err
+	}
+	return nil
 }
 
 func (c *Cats) Miao(r *Request, w Response) {
-	log.Println(r.Method, r.Uri)
 	fn, getRoute := c.GroupMap[r.Method+r.Uri]
 	switch {
 	case !getRoute:
@@ -150,7 +142,7 @@ func (c *Cats)Metric() {
 	}
 }
 
-func (s *Server) ShutDown() {
+func (s *server) ShutDown() {
 	s.Cats.ShutDown()
 }
 
@@ -159,7 +151,6 @@ func (c *Cats) ShutDown() {
 		delete(c.GroupMap, k)
 	}
 	once.Do(func() {
-		close(TaskCh)
 		close(stopCh)
 		log.Println("the server is closed")
 	})

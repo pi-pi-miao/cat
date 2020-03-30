@@ -1,9 +1,9 @@
 package cat
 
 import (
-	"strings"
+	"bytes"
 	"fmt"
-	"io"
+	"strings"
 )
 
 func NewResonse() Response {
@@ -30,7 +30,7 @@ func (w *Response) getCookie() bool {
 }
 
 func (w *Response) Result(status string, v interface{}) {
-	var buff strings.Builder
+	var buff bytes.Buffer
 	var sbuff strings.Builder
 	buff.WriteString(w.proto)
 	buff.WriteString(" ")
@@ -48,7 +48,9 @@ func (w *Response) Result(status string, v interface{}) {
 	}
 	buff.WriteString("\n")
 	buff.WriteString(fmt.Sprintf("%v", v))
-	result := buff.String()
+	result := buff.Bytes()
 	buff.Reset()
-	io.WriteString(w.conn, result)
+	w.conn.Write(result)
+	w.conn.Close()
+	w.server.remove(w.conn)
 }

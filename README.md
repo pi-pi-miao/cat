@@ -14,7 +14,7 @@ go get github.com/PyreneGitHub/cat
 
 
 
-## EXAMPLE
+## How to use
 
 ### first
 
