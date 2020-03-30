@@ -2,6 +2,7 @@ package cat
 
 import (
 	"fmt"
+	"github.com/panjf2000/ants/v2"
 	"golang.org/x/sys/unix"
 	"log"
 	"net"
@@ -66,6 +67,7 @@ func newServer(c *Cats,addr string)(*server,error){
 
 
 func (s *server) handler() {
+	p,_ := ants.NewPool(1000)
 	conns := make([]net.Conn,0,1000)
 	buf := make([]byte,1024)
 	for {
@@ -96,7 +98,9 @@ func (s *server) handler() {
 			req.parseRequestLine()
 			resp.conn = conn
 			resp.proto = req.proto
-			go s.handlers.Miao(req,resp)
+			p.Submit(func() {
+				s.handlers.Miao(req,resp)
+			})
 		}
 	}
 }
