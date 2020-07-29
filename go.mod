@@ -1,4 +1,4 @@
-module cat
+module github.com/pi-pi-miao/cat
 
 go 1.14
 
