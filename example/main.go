@@ -1,8 +1,6 @@
 package main
 
 import (
-	"time"
-
 	"github.com/pi-pi-miao/cat"
 )
 
@@ -14,7 +12,10 @@ func main(){
 	cats.Patch("/",do)
 	cats.Put("/",do)
 	go cats.Run(":8080")
-	time.Sleep(5*time.Second)
+	//time.Sleep(5*time.Second)
+	select {
+
+	}
 	cats.ShutDown()   //server closed gracefully
 }
 
