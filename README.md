@@ -22,7 +22,9 @@ go get github.com/pi-pi-miao/cat
 package main
 
 import (
-	"cat"
+    "time"
+
+	"github.com/pi-pi-miao/cat"
 )
 
 func main(){
@@ -33,7 +35,7 @@ func main(){
     cats.Patch("/",do)
     cats.Put("/",do)
     go cats.Run(":8080")
-    time.sleep(5*time.Second)
+    time.Sleep(5*time.Second)
     cats.ShutDown()   //server closed gracefully
 }
 
@@ -48,7 +50,7 @@ func do(r *cat.Request,w cat.Response){
 package main
 
 import (
-	"cat"
+	"github.com/pi-pi-miao/cat"
 )
 
 func main(){
